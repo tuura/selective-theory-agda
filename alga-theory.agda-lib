@@ -1,0 +1,4 @@
+name: alga-theory
+depend: agda-prelude
+include:
+  src
