@@ -38,22 +38,47 @@ either : ∀ {A : Set} {B : Set} {C : Set} →
            (A → C) → (B → C) → Either A B → C
 either f g (left  x) = f x
 either f g (right x) = g x
+
+data Pair (a b : Set) : Set where
+  _×_ : a → b → Pair a b
 ------------------------------------------------------------------
 record Functor (F : Set → Set) : Set₁ where
   infixl 4 _<$>_
   field
     fmap : ∀ {A B} → (A → B) → F A → F B
+
+    -- Functor laws
+    fmap-id      : ∀ {A} {x : F A} → fmap id x ≡ id x
+    fmap-compose : ∀ {A B C} {f : A → B} {g : B → C} {x : F A} →
+                   fmap (g ∘ f) x ≡ (fmap g ∘ fmap f) x  
+
   _<$>_ = fmap
 
 open Functor {{...}} public
 
+instance
+  FunctorFunction : {X : Set} → Functor (λ Y → (X → Y))
+  fmap {{FunctorFunction}} f g = λ x → f (g x)
+  fmap-id {{FunctorFunction}} = refl
+  fmap-compose {{FunctorFunction}} = refl 
+
+
 record Applicative (F : Set → Set) : Set₁ where
   infixl 4 _<*>_ _<*_ _*>_
   field
+    overlap {{super}} : Functor F
     pure  : ∀ {A} → A → F A
     _<*>_ : ∀ {A B} → F (A → B) → F A → F B
-    overlap {{super}} : Functor F
 
+    -- Applicative laws
+    ap-identity     : ∀ {A B} {f : F (A → B)} → (pure id <*> f) ≡ f
+    ap-homomorphism : ∀ {A B} {x : A} {f : A → B} →
+                      (pure f <*> pure x) ≡ pure (f x)
+    -- ap-interchange  : u <*> pure y = pure ($y) <*> u
+    -- ap-composition  : (.) <$> u <*> v <*> w = u <*> (v <*> w)
+    fmap-pure-ap : ∀ {A B} {x : F A} {f : A → B} →
+                   (f <$> x) ≡ (pure f <*> x)
+  
   _<*_ : ∀ {A B} → F A → F B → F A
   a <* b = ⦇ const a b ⦈
 
@@ -108,16 +133,34 @@ record Selective (F : Set → Set) : Set₁ where
     p2 : ∀ {A B} {x : A} {y : F (A → B)} →
          handle (pure (left x)) y ≡ ((_$ x) <$> y)
 
-    -- (A1) Associativity
-    
-    
+    -- -- (A1) Associativity
+    -- a1 : ∀ {A B C} {x : F (Either A B)} {y : F (Either C (A → B))} {z : F (C → A → B)} →
+    --      handle x (handle y z) ≡
+    --      handle (handle ((λ x → right x) <$> x) (λ a → bimap (λ x → (x × a)) (_$ a) y))
+
+-- A1: handle x (handle y z) = handle (handle (f <$> x) (g <$> y)) (h <$> z)
+--       where f x = Right <$> x
+--             g y = \a -> bimap (,a) ($a) y
+--             h z = uncurry z
+-- a1 :: Selective f => f (Either a b) -> f (Either c (a -> b)) -> f (c -> a -> b) -> f b
+-- a1 x y z = handle x (handle y z) === handle (handle (f <$> x) (g <$> y)) (h <$> z)
+--   where
+--     f x = Right <$> x
+--     g y = \a -> bimap (,a) ($a) y
+--     h z = uncurry z
 
 open Selective {{...}} public
+
+-- | 'Selective' is more powerful than 'Applicative': we can recover the
+-- application operator '<*>'. In particular, the following 'Applicative' laws
+-- hold when expressed using 'apS':
+--
+-- * Identity     : pure id <*> v = v
+-- * Homomorphism : pure f <*> pure x = pure (f x)
+-- * Interchange  : u <*> pure y = pure ($y) <*> u
+-- * Composition  : (.) <$> u <*> v <*> w = u <*> (v <*> w)
+apS : ∀ {A B : Set} {F : Set → Set} {{_ : Selective F}} →
+      F (A → B) → F A → F B
+apS f x = handle (left <$> f) (flip (_$_) <$> x)
 ---------------------------------------------------------------------
 
---------------------------------------------------------------------
--- Selective laws
-
--- f1 : ∀ {A B C} {F : Set → Set} {{_ : Selective F}} → {f : B → C} → {x : F (Either A B)} → {y : F (A → B)} →
---      (f <$> (handle x y)) ≡ handle (second f <$> x) ((f ∘_) <$> y) 
--- f1 = {!!}
