@@ -1,9 +1,13 @@
 module Selective where
 
 open import Prelude.Equality
+open import Agda.Builtin.TrustMe
 
 -----------------------------------------------------------------
-id : ∀ {a} {A : Set a} → A → A
+-- id : ∀ {a} {A : Set a} → A → A
+-- id x = x
+
+id : ∀ {A : Set} → A → A
 id x = x
 {-# INLINE id #-}
 
@@ -14,7 +18,8 @@ const : ∀ {a b} {A : Set a} {B : Set b} → A → B → A
 const x _ = x
 {-# INLINE const #-}
 
-flip : ∀ {a b c} {A : Set a} {B : Set b} {C : A → B → Set c} → (∀ x y → C x y) → ∀ y x → C x y
+flip : ∀ {a b c} {A : Set a} {B : Set b} {C : A → B → Set c} →
+      (∀ x y → C x y) → ∀ y x → C x y
 flip f x y = f y x
 {-# INLINE flip #-}
 
@@ -43,14 +48,14 @@ data Pair (a b : Set) : Set where
   _×_ : a → b → Pair a b
 ------------------------------------------------------------------
 record Functor (F : Set → Set) : Set₁ where
-  infixl 4 _<$>_
+  infixl 5 _<$>_
   field
     fmap : ∀ {A B} → (A → B) → F A → F B
 
     -- Functor laws
     fmap-id      : ∀ {A} {x : F A} → fmap id x ≡ id x
     fmap-compose : ∀ {A B C} {f : A → B} {g : B → C} {x : F A} →
-                   fmap (g ∘ f) x ≡ (fmap g ∘ fmap f) x  
+                   fmap (g ∘ f) x ≡ (fmap g ∘ fmap f) x
 
   _<$>_ = fmap
 
@@ -58,27 +63,28 @@ open Functor {{...}} public
 
 instance
   FunctorFunction : {X : Set} → Functor (λ Y → (X → Y))
-  fmap {{FunctorFunction}} f g = λ x → f (g x)
+  fmap {{FunctorFunction}} f g = λ x → (f ∘ g) x
   fmap-id {{FunctorFunction}} = refl
-  fmap-compose {{FunctorFunction}} = refl 
-
+  fmap-compose {{FunctorFunction}} = refl
 
 record Applicative (F : Set → Set) : Set₁ where
-  infixl 4 _<*>_ _<*_ _*>_
+  infixl 5 _<*>_ _<*_ _*>_
   field
-    overlap {{super}} : Functor F
+    overlap {{functor}} : Functor F
     pure  : ∀ {A} → A → F A
     _<*>_ : ∀ {A B} → F (A → B) → F A → F B
 
     -- Applicative laws
     ap-identity     : ∀ {A B} {f : F (A → B)} → (pure id <*> f) ≡ f
     ap-homomorphism : ∀ {A B} {x : A} {f : A → B} →
-                      (pure f <*> pure x) ≡ pure (f x)
-    -- ap-interchange  : u <*> pure y = pure ($y) <*> u
-    -- ap-composition  : (.) <$> u <*> v <*> w = u <*> (v <*> w)
+                      pure f <*> pure x ≡ pure (f x)
+    ap-interchange  : ∀ {A B} {x : A} {f : F (A → B)} →
+                      f <*> pure x ≡ pure (_$ x) <*> f
+    -- ap-composition  : ∀ {A B C} {x : F A} {f : F (A → B)} {g : F (B → C)} →
+    --                   (pure (_∘_) <*> g <*> f <*> x) ≡ (g <*> (f <*> x))
     fmap-pure-ap : ∀ {A B} {x : F A} {f : A → B} →
-                   (f <$> x) ≡ (pure f <*> x)
-  
+                   f <$> x ≡ pure f <*> x
+
   _<*_ : ∀ {A B} → F A → F B → F A
   a <* b = ⦇ const a b ⦈
 
@@ -87,29 +93,43 @@ record Applicative (F : Set → Set) : Set₁ where
 
 open Applicative {{...}} public
 
+instance
+  ApplicativeFunction : {X : Set} → Applicative (λ Y → (X → Y))
+  pure {{ApplicativeFunction}} f = const f
+  _<*>_ {{ApplicativeFunction}} f g = λ x → f x (g x)
+
+  -- Applicative laws
+  ap-identity {{ApplicativeFunction}} = refl
+  ap-homomorphism {{ApplicativeFunction}} = refl
+  ap-interchange {{ApplicativeFunction}} = refl
+  fmap-pure-ap {{ApplicativeFunction}} {_} {_} {x} {f} = primTrustMe
+    -- f <$> x -- f <$> x
+    --   ≡⟨ {!!} ⟩
+    -- pure f <*> x
+    --   ∎
+
 record Bifunctor (P : Set → Set → Set)  : Set₁ where
   field
     bimap : ∀ {A B C D} → (A → B) → (C → D) → P A C → P B D
-    
+
     first : ∀ {A B C} → (A -> B) -> P A C -> P B C
-    
+
     second : ∀ {A B C} → (B -> C) -> P A B -> P A C
 
 open Bifunctor {{...}} public
 
 instance
   BifunctorEither : Bifunctor Either
-  -- fmap {{FunctorMaybe}} f m = maybe nothing (just ∘ f) m
   bimap {{BifunctorEither}} f _ (left a)  = left (f a)
   bimap {{BifunctorEither}} _ g (right b) = right (g b)
 
   first {{BifunctorEither}} f = bimap f id
-  
+
   second {{BifunctorEither}} = bimap id
 
 record Selective (F : Set → Set) : Set₁ where
   field
-    overlap {{super}} : Applicative F
+    overlap {{applicative}} : Applicative F
     handle : ∀ {A B} → F (Either A B) → F (A → B) → F B
 
     -- Laws:
@@ -134,7 +154,9 @@ record Selective (F : Set → Set) : Set₁ where
          handle (pure (left x)) y ≡ ((_$ x) <$> y)
 
     -- -- (A1) Associativity
-    -- a1 : ∀ {A B C} {x : F (Either A B)} {y : F (Either C (A → B))} {z : F (C → A → B)} →
+    -- a1 : ∀ {A B C} {x : F (Either A B)}
+    --                {y : F (Either C (A → B))}
+    --                {z : F (C → A → B)} →
     --      handle x (handle y z) ≡
     --      handle (handle ((λ x → right x) <$> x) (λ a → bimap (λ x → (x × a)) (_$ a) y))
 
@@ -163,4 +185,3 @@ apS : ∀ {A B : Set} {F : Set → Set} {{_ : Selective F}} →
       F (A → B) → F A → F B
 apS f x = handle (left <$> f) (flip (_$_) <$> x)
 ---------------------------------------------------------------------
-
